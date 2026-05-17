@@ -40,10 +40,11 @@ const DEMO = {
 };
 
 // ─── Claude PDF Parser ────────────────────────────────────────────────────────
-async function parseNHIPdf(base64, apiKey) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+async function parseNHIPdf(base64) {
+  // 呼叫 Vercel 後端 API Route（避免 CORS 問題）
+  const res = await fetch("/api/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514", max_tokens: 4000,
       system: `你是台灣全民健保存摺PDF解析專家。請從PDF中提取所有資料，以純JSON格式回傳，不加任何說明或markdown。格式：{"person":{"name":"","nhiId":"","dob":"","blood":"","gender":""},"records":[{"id":1,"date":"YYYY-MM-DD","hospital":"","dept":"","doctor":"","diagnosis":"","prescription":[],"note":"","tag":"門診"}],"medications":[{"id":1,"name":"","dose":"","freq":"","days":30,"hospital":""}],"labResults":[{"date":"","item":"","value":"","unit":"","ref":"","status":"正常"}],"vaccines":[{"date":"","name":"","hospital":""}]}`,
@@ -59,10 +60,11 @@ async function parseNHIPdf(base64, apiKey) {
   return JSON.parse(raw.replace(/```json|```/g, "").trim());
 }
 
-async function chatWithAI(messages, systemPrompt, apiKey) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+async function chatWithAI(messages, systemPrompt) {
+  // 呼叫 Vercel 後端 API Route（避免 CORS 問題）
+  const res = await fetch("/api/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, system: systemPrompt, messages })
   });
   const d = await res.json();
@@ -308,7 +310,7 @@ function LoginScreen({ onLogin }) {
 }
 
 // ─── NHI Import ───────────────────────────────────────────────────────────────
-function NHIImportScreen({ user, apiKey, onImported, onSkip }) {
+function NHIImportScreen({ user, onImported, onSkip }) {
   const [phase, setPhase] = useState("guide");
   const [progress, setProgress] = useState(0);
   const [parsed, setParsed] = useState(null);
@@ -322,7 +324,7 @@ function NHIImportScreen({ user, apiKey, onImported, onSkip }) {
       const base64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.onerror = () => rej(); r.readAsDataURL(file); });
       setProgress(30);
       const timer = setInterval(() => setProgress(p => p < 85 ? p + 4 : p), 500);
-      const result = await parseNHIPdf(base64, apiKey);
+      const result = await parseNHIPdf(base64);
       clearInterval(timer); setProgress(100);
       setParsed(result); setPhase("done");
     } catch (e) { setPhase("error"); setErr(e.message || "解析失敗"); }
@@ -612,7 +614,7 @@ function ApptsScreen({ setScreen, appts, onAdd }) {
 }
 
 // ─── AI Chat ──────────────────────────────────────────────────────────────────
-function AIScreen({ setScreen, user, healthData, apiKey }) {
+function AIScreen({ setScreen, user, healthData }) {
   const [msgs, setMsgs] = useState([{ role: "assistant", content: healthData ? `您好！我是您的 AI 健康助理 🤖\n\n我已載入您的健保資料，共 ${healthData.records?.length || 0} 筆就診紀錄、${healthData.medications?.length || 0} 種用藥。請問有什麼健康問題？` : "您好！我是您的 AI 健康助理 🤖\n\n尚未載入健保資料，您可以直接描述症狀提問。" }]);
   const [input, setInput] = useState(""); const [loading, setLoading] = useState(false);
   const bottomRef = useRef();
@@ -625,7 +627,7 @@ function AIScreen({ setScreen, user, healthData, apiKey }) {
     const msg = input.trim(); setInput("");
     setMsgs(p => [...p, { role: "user", content: msg }]); setLoading(true);
     try {
-      const reply = await chatWithAI([...msgs.map(m => ({ role: m.role, content: m.content })), { role: "user", content: msg }], `你是台灣醫療 AI 健康助理，請用繁體中文回答，語氣親切專業。\n${ctx}\n注意：建議僅供參考，不能取代醫師診斷。`, apiKey);
+      const reply = await chatWithAI([...msgs.map(m => ({ role: m.role, content: m.content })), { role: "user", content: msg }], `你是台灣醫療 AI 健康助理，請用繁體中文回答，語氣親切專業。\n${ctx}\n注意：建議僅供參考，不能取代醫師診斷。`);
       setMsgs(p => [...p, { role: "assistant", content: reply }]);
     } catch (e) { setMsgs(p => [...p, { role: "assistant", content: `⚠️ ${e.message || "連線問題，請稍後重試。"}` }]); }
     setLoading(false);
@@ -660,7 +662,7 @@ function AIScreen({ setScreen, user, healthData, apiKey }) {
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
-function SettingsScreen({ setScreen, user, healthData, apiKey, onClearData, onChangeApiKey }) {
+function SettingsScreen({ setScreen, user, healthData, onClearData }) {
   const [confirm, setConfirm] = useState(false);
   return (
     <div style={{ fontFamily: "'Noto Sans TC',sans-serif", background: C.bg, minHeight: "100vh" }}>
@@ -684,14 +686,6 @@ function SettingsScreen({ setScreen, user, healthData, apiKey, onClearData, onCh
             <div style={{ background: healthData ? `${C.mint}20` : `${C.amber}20`, color: healthData ? C.mint : C.amber, fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20 }}>{healthData ? "已載入" : "示範資料"}</div>
           </div>
           <button onClick={() => setScreen("import")} style={{ width: "100%", padding: "10px", borderRadius: 11, border: `1.5px solid ${C.primary}`, background: "transparent", color: C.primary, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>重新匯入健保存摺 PDF 🔄</button>
-        </Card>
-
-        <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, padding: "10px 2px 6px", textTransform: "uppercase", letterSpacing: 1 }}>AI 金鑰</div>
-        <Card>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div><div style={{ fontSize: 13, fontWeight: 700, color: C.dark }}>Anthropic API 金鑰</div><div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>sk-ant-...{apiKey ? apiKey.slice(-8) : "未設定"}</div></div>
-            <button onClick={onChangeApiKey} style={{ padding: "7px 14px", borderRadius: 10, border: `1.5px solid ${C.primary}`, background: "transparent", color: C.primary, fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>更換</button>
-          </div>
         </Card>
 
         <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, padding: "10px 2px 6px", textTransform: "uppercase", letterSpacing: 1 }}>危險操作</div>
@@ -734,7 +728,6 @@ function BottomNav({ screen, setScreen }) {
 export default function App() {
   const [appState, setAppState] = useState("splash");
   const [screen, setScreen] = useState("home");
-  const [apiKey, setApiKey] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [healthData, setHealthData] = useState(null);
   const [appts, setAppts] = useState([]);
@@ -750,7 +743,6 @@ export default function App() {
   useEffect(() => {
     (async () => {
       await new Promise(r => setTimeout(r, 1500));
-      const savedKey = store.get("nhi-apikey");
       const savedUser = store.get("nhi-user");
       const savedHealth = store.get("nhi-healthdata");
       const savedAppts = store.get("nhi-appointments");
@@ -759,14 +751,11 @@ export default function App() {
 
       if (savedAppts) setAppts(savedAppts);
       if (savedTaken) setTakenMap(savedTaken);
-      if (!savedKey) { setAppState("apikey"); return; }
-      setApiKey(savedKey);
       if (savedUser) { setCurrentUser(savedUser); if (savedHealth) setHealthData(savedHealth); setAppState("main"); return; }
       setAppState(installShown ? "login" : "install");
     })();
   }, []);
 
-  const handleApiKey = (key) => { setApiKey(key); setAppState("install"); };
   const handleLogin = useCallback((user) => { setCurrentUser(user); store.set("nhi-user", user); setAppState("import"); }, []);
   const handleImported = useCallback((data) => {
     if (data.person) {
@@ -780,16 +769,14 @@ export default function App() {
   const handleSkip = useCallback(() => { setHealthData(null); setAppState("main"); setScreen("home"); }, []);
   const handleToggleMed = useCallback((id) => { setTakenMap(p => { const n = { ...p, [id]: !p[id] }; store.set("nhi-taken", n); return n; }); }, []);
   const handleAddAppt = useCallback((appt) => { setAppts(p => { const n = [...p, appt]; store.set("nhi-appointments", n); return n; }); }, []);
-  const handleClear = useCallback(() => { ["nhi-apikey", "nhi-user", "nhi-healthdata", "nhi-appointments", "nhi-taken", "nhi-install-shown"].forEach(k => store.del(k)); setApiKey(null); setCurrentUser(null); setHealthData(null); setAppts([]); setTakenMap({}); setAppState("apikey"); }, []);
-  const handleChangeApiKey = useCallback(() => { store.del("nhi-apikey"); setApiKey(null); setAppState("apikey"); }, []);
+  const handleClear = useCallback(() => { ["nhi-user", "nhi-healthdata", "nhi-appointments", "nhi-taken", "nhi-install-shown"].forEach(k => store.del(k)); setCurrentUser(null); setHealthData(null); setAppts([]); setTakenMap({}); setAppState("login"); }, []);
 
   const meds = healthData?.medications || [];
 
   if (appState === "splash") return <Splash />;
-  if (appState === "apikey") return <ApiKeySetup onDone={handleApiKey} />;
   if (appState === "install") return <InstallGuide onDone={() => { store.set("nhi-install-shown", true); setAppState("login"); }} />;
   if (appState === "login") return <LoginScreen onLogin={handleLogin} />;
-  if (appState === "import") return <NHIImportScreen user={currentUser} apiKey={apiKey} onImported={handleImported} onSkip={handleSkip} />;
+  if (appState === "import") return <NHIImportScreen user={currentUser} onImported={handleImported} onSkip={handleSkip} />;
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", fontFamily: "'Noto Sans TC',sans-serif" }}>
@@ -799,9 +786,9 @@ export default function App() {
       {screen === "records" && <RecordsScreen setScreen={setScreen} records={healthData?.records || []} />}
       {screen === "meds" && <MedsScreen setScreen={setScreen} medications={meds} takenMap={takenMap} onToggle={handleToggleMed} />}
       {screen === "appts" && <ApptsScreen setScreen={setScreen} appts={appts} onAdd={handleAddAppt} />}
-      {screen === "ai" && <AIScreen setScreen={setScreen} user={currentUser} healthData={healthData} apiKey={apiKey} />}
-      {screen === "import" && <NHIImportScreen user={currentUser} apiKey={apiKey} onImported={handleImported} onSkip={handleSkip} />}
-      {screen === "settings" && <SettingsScreen setScreen={setScreen} user={currentUser} healthData={healthData} apiKey={apiKey} onClearData={handleClear} onChangeApiKey={handleChangeApiKey} />}
+      {screen === "ai" && <AIScreen setScreen={setScreen} user={currentUser} healthData={healthData} />}
+      {screen === "import" && <NHIImportScreen user={currentUser} onImported={handleImported} onSkip={handleSkip} />}
+      {screen === "settings" && <SettingsScreen setScreen={setScreen} user={currentUser} healthData={healthData} onClearData={handleClear} />}
       {screen !== "ai" && <BottomNav screen={screen} setScreen={setScreen} />}
     </div>
   );
